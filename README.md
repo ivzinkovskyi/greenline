@@ -11,6 +11,10 @@ dependencies:
 - stability test for each curve point: a self-checking CUDA kernel (through `nvcuda.dll`, the driver compiles the PTX,
   so no CUDA SDK is needed).
 
+The tool is built for tuning mobile (laptop) GPUs, which the vendor restricts more than desktop cards: the power limit
+is fixed by the laptop maker and cannot be raised, so what is left is the clock cap, the offsets and the shape of the
+VF curve, and that is what greenline works with.
+
 Works with GPU 0 only. Every change lasts until a reboot or a driver reset; nothing is stored in the GPU or the driver.
 
 | Project | What |
