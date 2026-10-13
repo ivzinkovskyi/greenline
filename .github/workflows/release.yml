@@ -1,0 +1,44 @@
+# Push a tag v<version> (e.g. v1.0.4) -> build greenline.exe + Greenline.Core nupkg and attach them to a GitHub release
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Single framework-dependent exe (needs .NET 8 Runtime); tag version, else the one from Greenline.Core.csproj
+      - name: Build
+        shell: pwsh
+        run: |
+          $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') }
+                 else { ([xml](Get-Content Greenline.Core\Greenline.Core.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } }
+          dotnet publish greenline-cli -c Release -r win-x64 -p:SelfContained=false -p:PublishSingleFile=true `
+            -p:DebugType=embedded -p:Version=$ver -o publish
+          dotnet pack Greenline.Core -c Release -p:Version=$ver -o out
+          Copy-Item publish\greenline.exe out\
+          Compress-Archive out\greenline.exe "out\greenline-$ver-win-x64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: greenline
+          path: out/*
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
