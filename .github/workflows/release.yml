@@ -1,10 +1,10 @@
-# Push a tag v<version> (e.g. v1.0.4) -> build greenline.exe + Greenline.Core nupkg and attach them to a GitHub release
+# Push to the release branch -> build greenline.exe + Greenline.Core nupkg, tag v<Version> from Greenline.Core.csproj
+# and attach them to a GitHub release. Fails if that tag already exists: bump <Version> first.
 name: release
 
 on:
   push:
-    tags: ['v*']
-  workflow_dispatch:
+    branches: [release]
 
 permissions:
   contents: write
@@ -19,26 +19,32 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # Single framework-dependent exe (needs .NET 8 Runtime); tag version, else the one from Greenline.Core.csproj
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path Greenline.Core\Greenline.Core.csproj -Pattern '<Version>(.+)</Version>').Matches[0].Groups[1].Value
+          if (git ls-remote --tags origin "refs/tags/v$ver") {
+            Write-Output "::error::Tag v$ver already exists: bump <Version> in Greenline.Core.csproj"
+            exit 1
+          }
+          "ver=$ver" >> $env:GITHUB_OUTPUT
+
+      # Single framework-dependent exe (needs .NET 8 Runtime)
       - name: Build
         shell: pwsh
         run: |
-          $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') }
-                 else { ([xml](Get-Content Greenline.Core\Greenline.Core.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } }
+          $ver = '${{ steps.ver.outputs.ver }}'
           dotnet publish greenline-cli -c Release -r win-x64 -p:SelfContained=false -p:PublishSingleFile=true `
-            -p:DebugType=embedded -p:Version=$ver -o publish
-          dotnet pack Greenline.Core -c Release -p:Version=$ver -o out
+            -p:DebugType=embedded -o publish
+          dotnet pack Greenline.Core -c Release -o out
           Copy-Item publish\greenline.exe out\
           Compress-Archive out\greenline.exe "out\greenline-$ver-win-x64.zip"
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: greenline
-          path: out/*
-
       - name: Release
-        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.ver.outputs.ver }}
+          target_commitish: ${{ github.sha }}
           files: out/*
           generate_release_notes: true
