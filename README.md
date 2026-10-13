@@ -37,12 +37,14 @@ greenline-cli\bin\Release\net8.0-windows\greenline.exe help
 ## Usage
 
 ```
-greenline                                        status: clocks and offsets
+greenline                                        status: clocks, offsets, max voltage
+greenline maxclock 2100                          cap the core clock at 2100 MHz (off = remove the cap)
+greenline maxvoltage 900                         flat curve above 900 mV (undervolt; off = remove)
+greenline core 150                               core +150 MHz (whole curve shift)
+greenline mem 1000                               memory +1000 MHz
 greenline curve                                  VF curve: voltage -> clock and per-point offset
-greenline clock 2100                             cap the core clock at 2100 MHz (0 = remove the cap)
-greenline offset 150 1000                        core +150 MHz, memory +1000 MHz (whole curve shift)
-greenline curve set 700:+300 850:+250 cap 900    per-point offsets, flat above 900 mV (undervolt)
-greenline curve reset                            all point offsets back to 0
+greenline curve set 700:+300 850:+250            per-point core offsets
+greenline curve reset                            all point offsets back to 0, max voltage removed
 greenline stress 700-900 30                      test each curve point from 700 to 900 mV, 30 s each
 ```
 
@@ -52,13 +54,17 @@ Writes ask for confirmation; `--yes` (`-y`) skips it. Example output:
 > greenline
 NVIDIA GeForce RTX 4050 Laptop GPU: core 210 MHz (max 3105), memory 810 MHz (max 8001)
 Offsets: core 0 MHz (-1000..1000), memory +1200 MHz (-1000..3000)
+Core: core offset 0 MHz, no max voltage
 ```
 
 ### VF curve
 
 `curve set` takes anchors `<mV>:<MHz offset>`: offsets between anchors are interpolated by voltage and held flat
-outside them. `cap <mV>` flattens the curve above that voltage at the clock it reaches there, so the GPU never goes
-above that voltage. `offset` rewrites every point with one value and wipes a per-point curve.
+outside them. `core` rewrites every point with one value and replaces a per-point curve.
+
+`maxvoltage <mV>` flattens the curve above that voltage at the clock it reaches there, so the GPU never goes above
+that voltage. The flat top only exists as per-point offsets, so it is written together with the core offsets: `core`
+and `curve set` keep the current max voltage, `maxvoltage` keeps the current core offset or curve.
 
 ### Stress test
 

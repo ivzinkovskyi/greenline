@@ -193,10 +193,13 @@ public static class Gpu
         : mem < mmin || mem > mmax ? $"Memory offset must be within {mmin}..{mmax} MHz."
         : null;
 
+    // The core state comes from the VF curve: NVML keeps reporting its last core offset after per-point writes
     public static string Describe(Info i) =>
         $"{i.Name}: core {i.Clock} MHz (max {i.MaxClock}{(ReadMaxClockLock() is { } cap ? $", capped at {cap}" : "")}), " +
         $"memory {i.MemClock} MHz (max {i.MaxMemClock})\n" +
-        $"Offsets: core {Fmt(i.CoreOffset)}, memory {Fmt(i.MemOffset)}";
+        "Core: " + (ReadCore(out var err) is { } s ? s.Text + (s.CapMv is null ? ", no max voltage" : "") : $"unknown ({err})") +
+        (i.CoreOffset is var (_, mn, mx) ? $" (offset range {mn}..{mx} MHz)" : "") + "\n" +
+        $"Memory offset: {Fmt(i.MemOffset)}";
 
     static string Fmt((int Cur, int Min, int Max)? o) => o is var (c, mn, mx) ? $"{c:+0;-0;0} MHz ({mn}..{mx})" : "n/a";
 
@@ -237,7 +240,7 @@ public static class Gpu
             int? cap = null;
             for (int i = 0; i < t.Count; i++)
             {
-                if (t[i] == "cap" && i + 1 < t.Count && int.TryParse(t[i + 1], out int c) && c is >= 450 and <= 1250)
+                if (t[i] == "cap" && i + 1 < t.Count && int.TryParse(t[i + 1], out int c) && c is >= MinCapMv and <= MaxCapMv)
                     cap = c;
                 else if (t[i].Split(':') is [var v, var o] && int.TryParse(v, out int mv) && mv is >= 400 and <= 1300 &&
                          int.TryParse(o, out int mhz))
@@ -264,6 +267,50 @@ public static class Gpu
 
         public override string ToString() =>
             string.Join(" ", Anchors.Select(x => $"{x.Mv}:{x.Mhz:+0;-0;0}").Concat(CapMv is { } c ? ["cap", $"{c}"] : []));
+
+        // One global core offset (optionally with a max voltage) is a curve of one anchor
+        public static CurveSpec Global(int mhz, int? capMv = null) => new([(450, mhz)], capMv);
+
+        // The offset when every point gets the same one (no anchors = 0), otherwise null
+        public int? GlobalOffset => Anchors switch { [] => 0, [var a] => a.Mhz, _ => null };
+
+        public string Text =>
+            (GlobalOffset is { } k ? $"core offset {k:+0;-0;0} MHz" : $"VF curve {this with { CapMv = null }}") +
+            (CapMv is { } c ? $", max voltage {c} mV" : "");
+    }
+
+    public const int MinCapMv = 450, MaxCapMv = 1250;
+
+    // What drives the core now: the curve last written through WriteCore/WriteCurve while the GPU still holds it,
+    // else a uniform offset; null (with error) for a per-point curve written by something else
+    public static CurveSpec? ReadCore(out string? error)
+    {
+        if (ReadCurve(out error) is not var (pts, _))
+            return null;
+        var offs = pts.Select(p => p.OffsetMhz).ToArray();
+        if (LoadLastCurve() is { } last && CurveIsLast(last, offs))
+            return last;
+        if (offs.Distinct().ToArray() is [var k])
+            return CurveSpec.Global(k);
+        error = "the VF curve was written by another tool";
+        return null;
+    }
+
+    // Writes the core: a global offset without max voltage goes through NVML (which then reports it back), anything else
+    // per point. Returns an error text or null.
+    public static string? WriteCore(Info i, CurveSpec spec)
+    {
+        if (i.CoreOffset is not var (_, min, max))
+            return "driver does not report the core offset range";
+        if (spec.GlobalOffset is not { } k || spec.CapMv is not null)
+            return WriteCurve(spec, min, max);
+        if (SetOffsets(k, null) is var rc and not 0)
+            return $"NVML rejected the change (status {rc}{(rc == 4 ? ": run as Administrator" : "")})";
+        // NVML normally rewrites every point; make sure no per-point offsets are left behind
+        string? error = ReadCurve(out _)?.Points.Any(p => p.OffsetMhz != k) == true ? WriteCurvePoints(spec, min, max) : null;
+        SaveLastCurve(null);
+        SaveCurveSig(null);
+        return error;
     }
 
     delegate int NvInit();
