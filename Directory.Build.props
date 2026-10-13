@@ -1,0 +1,6 @@
+<Project>
+  <!-- Pdb (embedded in the dll) records source paths: write /_/... instead of the local checkout folder -->
+  <PropertyGroup>
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
+  </PropertyGroup>
+</Project>

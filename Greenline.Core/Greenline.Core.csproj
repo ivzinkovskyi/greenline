@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- NVIDIA GPU tuning library: NVML clock cap/offsets, NVAPI VF curve, CUDA stress test, shared CLI (GpuCli) -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Greenline</RootNamespace>
+    <!-- NuGet package: bump Version on every change, NuGet caches a version forever (see pack.ps1) -->
+    <PackageId>Greenline.Core</PackageId>
+    <Version>1.0.1</Version>
+    <Authors>ivzkv</Authors>
+    <Description>NVIDIA GPU tuning: NVML clock cap/offsets, NVAPI VF curve with a voltage cap, CUDA stress test.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- pdb inside the dll and sources linked in: step into the library from the host -->
+    <DebugType>embedded</DebugType>
+    <EmbedAllSources>true</EmbedAllSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
