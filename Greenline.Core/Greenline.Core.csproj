@@ -8,7 +8,7 @@
     <RootNamespace>Greenline</RootNamespace>
     <!-- NuGet package: bump Version on every change, NuGet caches a version forever (see pack.ps1) -->
     <PackageId>Greenline.Core</PackageId>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <Authors>ivzkv</Authors>
     <Description>NVIDIA GPU tuning: NVML clock cap/offsets, NVAPI VF curve with a voltage cap, CUDA stress test.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

@@ -134,7 +134,8 @@ public static class GpuCli
             Console.Error.WriteLine(bad);
             return (null, null);
         }
-        return (prompt ?? $"Set the GPU {spec.Text} until reboot?", () => Gpu.WriteCore(info, spec));
+        // A max voltage leak is shown by Describe after the write
+        return (prompt ?? $"Set the GPU {spec.Text} until reboot?", () => Gpu.WriteCore(info, spec) is Gpu.Result.Failure f ? f.Error : null);
     }
 
     static string? Nvml(int rc) => rc == 0 ? null : $"NVML status {rc}{(rc == 4 ? ": run as Administrator" : "")}";

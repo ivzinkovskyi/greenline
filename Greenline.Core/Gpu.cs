@@ -199,7 +199,34 @@ public static class Gpu
         $"memory {i.MemClock} MHz (max {i.MaxMemClock})\n" +
         "Core: " + (ReadCore(out var err) is { } s ? s.Text + (s.CapMv is null ? ", no max voltage" : "") : $"unknown ({err})") +
         (i.CoreOffset is var (_, mn, mx) ? $" (offset range {mn}..{mx} MHz)" : "") + "\n" +
-        $"Memory offset: {Fmt(i.MemOffset)}";
+        $"Memory offset: {Fmt(i.MemOffset)}" + (MaxVoltageWarning() is { } w ? $"\nWarning: {w.Text}." : "");
+
+    // Offsets only go down to the driver's minimum (-1000 MHz on the 4050 Laptop), so far enough above a low max voltage
+    // the stock clock minus that still climbs past clock(cap) and the GPU boosts there (2026-10-15: cap 650 mV = 1545 MHz,
+    // from 1025 mV the curve rose to 1635 MHz, the GPU went up to ~1 V). Only a clock cap at clock(cap) holds it then.
+    // MaxVoltageWarning returns where it breaks, or null when the max voltage holds (or there is none, or such a clock
+    // cap is set). The curve also shifts by a 15 MHz bin with temperature after the write, so only points whose offset
+    // sits at the minimum and that are more than a bin above clock(cap) count; a clock cap within a bin of clock(cap) holds it.
+    public record MaxVoltageLeak(int CapMv, int CapMhz, int FromMv, int TopMhz, int MinOffsetMhz)
+    {
+        public string Text => $"max voltage {CapMv} mV is beyond the driver's offset limit ({MinOffsetMhz} MHz): from {FromMv} mV " +
+                              $"the curve climbs again up to {TopMhz} MHz; also cap the clock at {CapMhz} MHz";
+    }
+
+    public static MaxVoltageLeak? MaxVoltageWarning()
+    {
+        if (ReadCore(out _)?.CapMv is not { } cap || ReadCurve(out _) is not var (pts, _) ||
+            Read(out _)?.CoreOffset is not var (_, min, _))
+            return null;
+        int ci = pts.FindLastIndex(p => p.Mv <= cap);
+        if (ci < 0)
+            return null;
+        int shelf = pts[ci].Mhz;
+        if (pts.FindIndex(ci + 1, p => p.OffsetMhz <= min && p.Mhz > shelf + 15) is not (var i and >= 0) ||
+            ReadMaxClockLock() is { } lck && lck <= shelf + 15)
+            return null;
+        return new(cap, shelf, pts[i].Mv, pts.Max(p => p.Mhz), min);
+    }
 
     static string Fmt((int Cur, int Min, int Max)? o) => o is var (c, mn, mx) ? $"{c:+0;-0;0} MHz ({mn}..{mx})" : "n/a";
 
@@ -297,13 +324,15 @@ public static class Gpu
     }
 
     // Writes the core: a global offset without max voltage goes through NVML (which then reports it back), anything else
-    // per point. Returns an error text or null.
-    public static string? WriteCore(Info i, CurveSpec spec)
+    // per point.
+    public static Result WriteCore(Info i, CurveSpec spec) => Done(WriteCoreError(i, spec));
+
+    static string? WriteCoreError(Info i, CurveSpec spec)
     {
         if (i.CoreOffset is not var (_, min, max))
             return "driver does not report the core offset range";
         if (spec.GlobalOffset is not { } k || spec.CapMv is not null)
-            return WriteCurve(spec, min, max);
+            return WriteCurveError(spec, min, max);
         if (SetOffsets(k, null) is var rc and not 0)
             return $"NVML rejected the change (status {rc}{(rc == 4 ? ": run as Administrator" : "")})";
         // NVML normally rewrites every point; make sure no per-point offsets are left behind
@@ -390,14 +419,26 @@ public static class Gpu
     // Writes per-point core offsets (spec null = all 0; memory points are written back unchanged). With a cap the
     // anchors go first, then points above the cap get clock(cap) - their own base clock (status - offset, which can
     // only overestimate the base, so the driver's non-decreasing rule lifts them to exactly clock(cap)), clamped to
-    // minMhz. Returns an error text or null.
-    public static string? WriteCurve(CurveSpec? spec, int minMhz, int maxMhz)
+    // minMhz.
+    public static Result WriteCurve(CurveSpec? spec, int minMhz, int maxMhz) => Done(WriteCurveError(spec, minMhz, maxMhz));
+
+    static string? WriteCurveError(CurveSpec? spec, int minMhz, int maxMhz)
     {
         string? error = WriteCurvePoints(spec, minMhz, maxMhz);
         if (error is null)
             SaveCurveSig(ReadCurve(out _)?.Points.Select(p => p.OffsetMhz));
         return error;
     }
+
+    // Outcome of a core write. Failure: the driver did not take it (the GPU may hold a partial write). Success: written,
+    // Leak set when the max voltage is beyond the offset limit and still needs a clock cap (see MaxVoltageWarning).
+    public abstract record Result
+    {
+        public sealed record Success(MaxVoltageLeak? Leak) : Result;
+        public sealed record Failure(string Error) : Result;
+    }
+
+    static Result Done(string? error) => error is null ? new Result.Success(MaxVoltageWarning()) : new Result.Failure(error);
 
     static string? WriteCurvePoints(CurveSpec? spec, int minMhz, int maxMhz)
     {
